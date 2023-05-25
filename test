@@ -1,0 +1,607 @@
+//+------------------------------------------------------------------+
+//|                                                 www.mgmforex.com |
+//|                                                 www.mgmforex.com |
+//|            new (filter by candle direction)      www.mgmforex.com |
+//+------------------------------------------------------------------+
+#property copyright "www.mgmforex.com"
+#property link      "www.mgmforex.com"
+#property version   "1.00"
+#property strict
+#property indicator_chart_window
+#property indicator_buffers 4
+#property indicator_color1 clrBlue
+#property indicator_color2 clrRed
+#property indicator_color3 clrWhite
+#property indicator_color4 clrWhite
+extern int BarLimit = 4;
+extern double DISTANCE_ARROW = 1;
+extern int _K_period = 15;
+extern int _D_period = 3;
+extern int Slowing = 5;
+extern ENUM_MA_METHOD Sto_MA_Mode = MODE_SMA;   // Sto_MA_Mode
+extern ENUM_STO_PRICE Sto_Price_Mode = STO_CLOSECLOSE;   // Sto_Price_Mode
+
+extern bool _1candlechek = false; // check last 1 candle
+extern bool _2candlechek = false; // check last 2 candles
+
+extern double ExtremOverBoughtValue = 95;
+extern double ExtremOverSoldValue = 5;
+
+extern double overBoughtValue = 80;
+extern double overSoldValue = 20;
+// Define the list of index names as an enumeration
+extern bool Chose_INDEX ;// DO YOU WANT TO CHOOSE INDEX NAME ?
+enum IndexNameEnum
+  {
+   GBPLFX,
+   EURLFX,
+   USDLFX,
+   AUDLFX,
+   NZDLFX,
+   CADLFX,
+   CHFLFX,
+   LFXJPY
+  };
+// External parameters section
+extern IndexNameEnum IndexName ; // Default index name
+
+string IDX1, IDX2,IDX;
+bool previousBuy = false;
+bool previousSell = false;
+string alertSymbol; // declare alertSymbol as a global variable
+double waveSignal = 0.0; // Global variable to store waveSignal
+double waveSignalIDX1 = 0.0; // Global variable to store waveSignal
+double waveSignalIDX2 = 0.0; // Global variable to store waveSignal
+
+double last_cross = EMPTY_VALUE;
+double last_crossIDX1 = EMPTY_VALUE;
+double last_crossIDX2 = EMPTY_VALUE;
+datetime lastTime, T1, T2;
+double BufferUp[], BufferDown[], BufferSignalbuy[], BufferSignalsell[];
+
+color BuyColor = clrGreen; // Define the BuyColor
+color SellColor = clrRed;  // Define the SellColor
+
+//+------------------------------------------------------------------+
+//| Custom indicator initialization function                         |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   string ls_0 = "2024.12.31";
+   datetime l_str2time_8 = StrToTime(ls_0);
+   if(TimeCurrent() >= l_str2time_8)
+     {
+      Comment("contact me .. Mail: manager_mgmforex@yahoo.com/whatsapp:00201004154512");
+      Print("");
+      return (0);
+     }
+
+   SetIndexStyle(0, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(0, BufferUp);
+   SetIndexArrow(0, 233);
+   SetIndexStyle(1, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(1, BufferDown);
+   SetIndexArrow(1, 234);
+   SetIndexStyle(2, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(2, BufferSignalbuy);
+   SetIndexArrow(2, 233);
+   SetIndexStyle(3, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(3, BufferSignalsell);
+   SetIndexArrow(3, 234);
+   
+   
+   
+// Convert the index name enumeration to a string
+   if(Chose_INDEX=true)
+     {
+      switch(IndexName)
+        {
+         case GBPLFX:
+            IDX = "GBPLFX";
+            break;
+         case EURLFX:
+            IDX = "EURLFX";
+            break;
+         case USDLFX:
+            IDX = "USDLFX";
+            break;
+         case AUDLFX:
+            IDX = "AUDLFX";
+            break;
+         case NZDLFX:
+            IDX = "NZDLFX";
+            break;
+         case CADLFX:
+            IDX = "CADLFX";
+            break;
+         case CHFLFX:
+            IDX = "CHFLFX";
+            break;
+         case LFXJPY:
+            IDX = "LFXJPY";
+            break;
+         default:
+            IDX = "GBPLFX"; // Default index name
+        }
+     };
+// getCurrencyPairIndexes
+   getCurrencyPairIndexes(Symbol(), IDX1, IDX2,IDX);
+   Print("main index:   "+IDX+"///main index1   : "+ IDX1+"///Sec index2   : "+IDX2);
+
+// find the latest exrem index 1
+   calculatefirstWaveSignal(IDX1, waveSignalIDX1);
+   Print("signal 1: " + DoubleToString(waveSignalIDX1));
+// find the latest exrem index 2
+   calculatefirstWaveSignal(IDX2, waveSignalIDX2);
+   Print("signal 2: " + DoubleToString(waveSignalIDX2));
+// getting the direction
+   if
+   (waveSignalIDX1 == 1 && waveSignalIDX2 == -1)
+     {
+      waveSignal = 1;
+     }
+   else
+      if(waveSignalIDX1 == -1 && waveSignalIDX2 == 1)
+        {
+         waveSignal = -1;
+        }
+      else
+        {
+         waveSignal = 0;
+        }
+
+   Print("signal: " + DoubleToString(waveSignal));
+
+   return (INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int OnCalculate(const int rates_total, const int prev_calculated, const datetime& time[], const double& open[],
+                const double& high[], const double& low[], const double& close[], const long& tick_volume[],
+                const long& volume[], const int& spread[])
+  {
+   int start;
+   double prev_waveSignal = 0;
+
+   if(prev_calculated > rates_total || prev_calculated <= 0)
+     {
+      start = rates_total - BarLimit;
+     }
+   else
+     {
+      start = prev_calculated - 1;
+     }
+
+   for(int i = start; i < rates_total && !IsStopped(); i++)
+     {
+      // Calculate waveSignal every 3 bars
+      if(i % 3 == 0)
+        {
+         if(calculateWaveSignal(3,IDX)==1)
+           {
+            waveSignal = 1;
+           }
+         else
+            if(calculateWaveSignal(3,IDX)==-1)
+              {
+               waveSignal = -1;
+              }
+            else
+              {waveSignal =0;}
+         ;
+
+         string message = "";
+         if(waveSignal == 1 && prev_waveSignal == -1)
+           {
+            message = "Turned from SELL to BUY at " + TimeToString(time[i]);
+           }
+         else
+            if(waveSignal == -1 && prev_waveSignal == 1)
+              {
+               message = "Turned from BUY to SELL at " + TimeToString(time[i]);
+              }
+
+         // Add comment to print waveSignal value
+         string comment = "Main INDEX : "
+                          + IDX
+                          + " ______________________"
+                          + " Last DIRECTION FOR Main INDEX IS : "
+                          + (waveSignalIDX1 == 1 ? "BUY" : (waveSignalIDX1 == -1 ? "SELL" : "none"))
+                          + "  DIRECTION FOR THE SEC INDEX IS : "
+                          + (waveSignalIDX2 == 1 ? "BUY" : (waveSignalIDX2 == -1 ? "SELL" : "none"))
+                          + "  DIRECTION FOR THE PAIR IS________ : "
+                          + (waveSignal == 1 ? "BUY" : (waveSignal == -1 ? "SELL" : "none"))
+                          + (message != "" ? " // " + message : ""); // Concatenate the message if it exists
+
+         Comment(comment); // Display the comment on the chart
+        }
+        Print(waveSignal);
+
+      // Use waveSignal as per your logic
+      Patterns_Finder(PERIOD_CURRENT);
+      lastTime = time[0];
+
+      //Update prev_waveSignal for the next iteration
+      prev_waveSignal = waveSignal;
+     }
+
+
+   return (rates_total);
+  }
+
+
+//+------------------------------------------------------------------+
+//|            Pattern Finders                                       |
+//+------------------------------------------------------------------+
+void Patterns_Finder(int TF)
+  {
+   int a = 0;
+
+   for(int i = 0; i <= BarLimit; i++)
+     {
+     if (IDX != "LFXJPY")
+    {
+          // BUY CONDITIONS
+      
+      if( IsCrossOverBuy(i,Symbol())&& waveSignal == 1.0)
+        {
+         a = 1;
+         Set_Colors_Strings(i, OP_BUY);
+        }
+
+      // SELL CONDITIONS
+      if( IsCrossOverSell(i,Symbol())&&waveSignal == -1.0)
+        {
+         a = 1;
+         Set_Colors_Strings(i, OP_SELL);
+        }
+
+      a = 0;
+     }
+//+------------------------------------------------------------------+
+   /* else
+    {
+          // BUY CONDITIONS
+      
+      if(IsCrossOverBuy(i,IDX1) &&IsCrossOverBuy(i,IDX2)&& localWaveSignal == 1.0)
+        {
+         a = 1;
+         Set_Colors_Strings(i, OP_BUY);
+        }
+
+      // SELL CONDITIONS
+      if(IsCrossOverSell(i,IDX1) &&IsCrossOverSell(i,IDX2)&& localWaveSignal == -1.0)
+        {
+         a = 1;
+         Set_Colors_Strings(i, OP_SELL);
+        }
+
+      a = 0;
+     
+     }
+     */
+    }
+
+  }
+//+------------------------------------------------------------------+
+
+/*
+if (IDX != "LFXJPY")
+    {
+    
+    }
+    else
+    {
+    
+    }
+    */
+
+//+------------------------------------------------------------+
+//|              ALERT                                          |
+//+------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void Alert(string message, int shift)
+  {
+   if(shift > 0 && T1 != Time[shift])
+     {
+      T1 = Time[shift];
+      datetime alertTime = Time[shift];
+      string timeStr = TimeToString(alertTime, TIME_DATE | TIME_MINUTES);
+      Alert(alertSymbol + " " + message + " , " + timeStr);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|               Set_Colors_Strings                                 |
+//+------------------------------------------------------------------+
+    /*
+      SetIndexStyle(2, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(2, BufferSignalbuy);
+   SetIndexArrow(2, 233);
+   SetIndexStyle(3, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(3, BufferSignalsell);
+   SetIndexArrow(3, 234);
+*/
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void Set_Colors_Strings(int x, int type)
+  {
+   if(type == OP_BUY && !previousBuy)
+     {
+      BufferUp[x + 1] = Low[x + 1];
+      Alert("Buy EXYREM", x + 1);
+      previousBuy = true;
+      previousSell = false;
+     }
+   else
+      if(type == OP_SELL && !previousSell)
+        {
+         BufferDown[x + 1] = High[x + 1];
+         Alert("SELL EXTREM", x + 1);
+         previousSell = true;
+         previousBuy = false;
+        }
+
+// Set the color of the histogram bar based on the waveSignal value
+   if(waveSignal == 1){
+      SetIndexStyle(2, DRAW_ARROW, 0, 3);
+      SetIndexBuffer(2, BufferSignalbuy);
+   SetIndexArrow(2, 233);}
+     // Green for Buy
+   else
+      if(waveSignal == -1)
+{
+ SetIndexStyle(3, DRAW_ARROW, 0, 3);
+   SetIndexBuffer(3, BufferSignalsell);
+   SetIndexArrow(3, 234);
+
+
+}
+  }
+
+
+//+-----------------------wael function -----------------------------+
+double calculatefirstWaveSignal(string index_name, double &last_cross_local)
+  {
+   int bar = 0;
+
+   while(true)
+     {
+      double STK_main = STK_Main(bar, index_name,PERIOD_H1);
+      double STK_signal = STK_Signal(bar, index_name,PERIOD_H1);
+
+      if(index_name != "LFXJPY")
+        {
+         if(STK_main >= ExtremOverBoughtValue && last_cross_local != -1)
+           {
+            last_cross_local = -1;
+            break;
+           }
+         else
+            if(STK_main <= ExtremOverSoldValue && last_cross_local != 1)
+              {
+               last_cross_local = 1;
+               break;
+              }
+        }
+      else
+        {
+         if(STK_main >= ExtremOverBoughtValue && last_cross_local != 1)
+           {
+            last_cross_local = 1;
+            break;
+           }
+         else
+            if(STK_main <= ExtremOverSoldValue && last_cross_local != -1)
+              {
+               last_cross_local = -1;
+               break;
+              }
+        }
+
+      bar++;
+     }
+
+   return last_cross_local;
+  }
+
+//+------------------------------------------------------------------+
+//|                           EXtreem                  |
+//+------------------------------------------------------------------+
+double calculateWaveSignal(int barsToCheck, string index_name)
+  {
+   for(int bar = 0; bar < barsToCheck; bar++)
+     {
+      double STK_main = STK_Main(bar, index_name,PERIOD_H1);
+      double STK_signal = STK_Signal(bar, index_name,PERIOD_H1);
+      if(index_name != "LFXJPY")
+        {
+         if(STK_main >= ExtremOverBoughtValue && last_cross != -1)
+           {
+            last_cross = -1;
+           }
+         else
+            if(STK_main <= ExtremOverSoldValue  && last_cross != 1)
+              {
+               last_cross = 1;
+              }
+        }
+      else
+        {
+         if(STK_main >= ExtremOverBoughtValue  && last_cross != 1)
+           {
+            last_cross = 1;
+           }
+         else
+            if(STK_main <= ExtremOverSoldValue  && last_cross != -1)
+              {
+               last_cross = -1;
+              }
+
+        }
+
+
+     }
+   return last_cross;
+  }
+//+------------------------------------------------------------------+
+//|                           GET THE 2 INDIX NAME                   |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void getCurrencyPairIndexes(string symbolName, string& localInd1, string& localInd2,string& localInd3)
+  {
+   if(StringLen(symbolName) >= 6)
+     {
+      string baseCurrency = StringSubstr(symbolName, 0, 3);
+      string quoteCurrency = StringSubstr(symbolName, StringLen(symbolName) - 3);
+
+      localInd1 = baseCurrency + "LFX";
+      localInd2 = (quoteCurrency == "JPY") ? "LFXJPY" : (quoteCurrency + "LFX");
+      localInd3 = (quoteCurrency == "JPY")? baseCurrency + "LFX" : baseCurrency + "LFX";
+     }
+   else
+     {
+      // Handle case where symbol name is too short to extract base and quote currencies
+      localInd1 = "";
+      localInd2 = "";
+      localInd3 = "";
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                         GET THE MAIN STOCK LINE                  |
+//+------------------------------------------------------------------+
+double STK_Main(int x, string idx_name, ENUM_TIMEFRAMES timeframe)
+  {
+   double stochasticValue = iStochastic(idx_name, timeframe, _K_period, _D_period, Slowing, Sto_MA_Mode, Sto_Price_Mode, MODE_MAIN, x);
+
+// Check if iStochastic returned a reasonable value
+   if(stochasticValue < 0)
+     {
+      stochasticValue = 0;
+     }
+
+   if(stochasticValue > 100)
+     {
+      stochasticValue = 100;
+     }
+
+   return stochasticValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                         GET THE SIGNAL STOCK LINE                |
+//+------------------------------------------------------------------+
+double STK_Signal(int x, string idx_name, ENUM_TIMEFRAMES timeframe)
+  {
+   double stochasticValue = iStochastic(idx_name, timeframe, _K_period, _D_period, Slowing, Sto_MA_Mode, Sto_Price_Mode, MODE_SIGNAL, x);
+
+// Check if iStochastic returned a reasonable value
+   if(stochasticValue < 0)
+     {
+      stochasticValue = 0;
+     }
+
+   if(stochasticValue > 100)
+     {
+      stochasticValue = 100;
+     }
+
+   return stochasticValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                        Main over bought?                         |
+//+------------------------------------------------------------------+
+bool isMainOverBought(int x, string idx_name)
+  {
+   return STK_Main(x, idx_name,PERIOD_CURRENT) > overBoughtValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                        Signal over bought?                       |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool isSignalOverBought(int x, string idx_name)
+  {
+   return STK_Signal(x, idx_name,PERIOD_CURRENT) > overBoughtValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                        Main over Sold?                           |
+//+------------------------------------------------------------------+
+bool isMainOverSold(int x, string idx_name)
+  {
+   return STK_Main(x, idx_name,PERIOD_CURRENT) < overSoldValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                        Signal over Sold?                         |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool isSignalOverSold(int x, string idx_name)
+  {
+   return STK_Signal(x, idx_name,PERIOD_CURRENT) < overSoldValue;
+  }
+
+//+------------------------------------------------------------------+
+//|                      Isup ?                                      |
+//+------------------------------------------------------------------+
+bool IsUp(int x, string idx_name)
+  {
+// Get the main and signal lines for the specified currency pair and bar index
+   double main_line = STK_Main(x, idx_name,PERIOD_CURRENT);
+   double signal_line = STK_Signal(x, idx_name,PERIOD_CURRENT);
+
+// Check if the main line is above the signal line
+   return main_line > signal_line;
+  }
+//+------------------------------------------------------------------+
+//|                      Is down ?                                   |
+bool IsDn(int x, string idx_name)
+  {
+// Get the main and signal lines for the specified currency pair and bar index
+   double main_line = STK_Main(x, idx_name,PERIOD_CURRENT);
+   double signal_line = STK_Signal(x, idx_name,PERIOD_CURRENT);
+
+// Check if the main line is below the signal line
+   return main_line < signal_line;
+  }
+//+------------------------------------------------------------------+
+//|                     Is cross over BUY                             |
+//+------------------------------------------------------------------+
+bool IsCrossOverBuy(int x, string idx_name)
+  {
+      return IsUp(x + 1, idx_name) &&
+             IsDn(x + 2, idx_name) &&
+             waveSignal == 1 &&
+             (isMainOverBought(x + 2, idx_name)||STK_Main(x+2, idx_name,PERIOD_CURRENT)<=0.5) ;
+
+  }
+//+------------------------------------------------------------------+
+//|                     Is cross over Sell                           |
+//+------------------------------------------------------------------+
+bool IsCrossOverSell(int x, string idx_name)
+  {
+      return IsDn(x + 1, idx_name) &&
+             IsUp(x + 2, idx_name) &&
+             waveSignal == -1.0 &&
+             (isMainOverSold(x + 2, idx_name)||STK_Main(x+2, idx_name,PERIOD_CURRENT)>=99.5);
+
+  }
+//+------------------------------------------------------------------+
